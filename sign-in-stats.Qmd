@@ -1,0 +1,272 @@
+---
+title: "Studio Use"
+format: html
+knitr:
+  opts_chunk: 
+    collapse: true
+    comment: "#" 
+    echo: false
+    message: false
+---
+
+```{r setup}
+library(googlesheets4)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(viridis)
+library(forcats)
+library(plotly)
+library(DT)
+library(glue)
+library(tidyr)
+```
+
+```{r google_sheet}
+membership_sheet <- "https://docs.google.com/spreadsheets/d/1Ldrcx_iVWi2Bv3GQoIHE2hOkf0Ah-nKVK3GFnXBXfts/edit?gid=1039957161#gid=1039957161"
+membership <- read_sheet(membership_sheet, sheet = "2025-2026")
+
+sheet <- "https://docs.google.com/spreadsheets/d/1-XhBYaeJI-uwPJsDb2ucxgnifXC1WdGjejI9a0QK0Po/edit?gid=1184437612#gid=1184437612"
+signin <- read_sheet(sheet)
+```
+
+```{r clean_up}
+signin_clean <- signin |>
+  select(Timestamp, `Column 2`, Action) |>
+  mutate(
+    date = date(Timestamp),
+    month = month(date),
+    day_of_week = wday(date, label = TRUE)
+  ) |>
+  rename("member" = "Column 2")
+```
+
+```{r signout_analysis}
+no_signout <- signin_clean |>
+  group_by(member, date) |>
+  count() |>
+  filter(n == 1) |>
+  nrow()
+
+multi_signin <- signin_clean |>
+  group_by(member, date) |>
+  count() |>
+  mutate(in_studio = n / 2) |>
+  filter(in_studio > 1)
+```
+
+### Data Limitations
+
+-   During this time members still signed in manually
+-   Some new member sign ins were not captured
+-   Not all sign out times were logged
+-   `r no_signout` of `r NROW(signin_clean)` (`r round((no_signout / NROW(signin_clean)) * 100, 2)` %) entries did not have a sign out
+
+### Findings
+
+#### Number of Unique People Per Day
+
+-   Data collection spans from `r min(signin_clean$date)` to `r max(signin_clean$date)`
+-   Wide spread use only kicks in in December 2025
+
+```{r usage}
+people_per_day <- signin_clean |>
+  filter(Action == "Sign In") |>
+  group_by(date) |>
+  count() |>
+  mutate(month = month(date), day_of_week = wday(date, label = TRUE))
+```
+
+```{r sign_in_implementation}
+ggplot(people_per_day, aes(x = date, y = n)) +
+  geom_col() +
+  ggtitle("Number of sign ins per day")
+```
+
+```{r}
+member_usage <- signin_clean |>
+  group_by(member) |>
+  count() |>
+  arrange(desc(n))
+```
+
+### By Person usage
+
+-   Only captures people using the sign in form
+-   `r NROW(member_usage)`/ `r NROW(membership)` (`r round((NROW(member_usage)/NROW(membership))*100, 2)` %) has been using the sign in form or coming into the studio
+-   Of the `r max(signin_clean$date) - min(signin_clean$date)` days the form was in use, `r NROW(multi_signin)` members came multiple times in a single day
+
+
+#### Studio usage over days of the week
+
+```{r calendar_plot}
+closed <- data.frame(
+  date = as.Date(c("2025-12-25", "2025-12-26", "2026-01-01")),
+  week = c("2025 - 51", "2025 - 51", "2026 - 1"),
+  day_of_week = c("Thu", "Fri", "Thu"),
+  n = c(NA, NA, NA)
+)
+
+people_per_date_formatted <- people_per_day |>
+  mutate(
+    month = as.factor(month),
+    week = glue("{year(date)} - {week(date)}")
+  ) |>
+  filter(date > "2025-11-27") |>
+  select(week, day_of_week, n)
+
+plot_data <- rbind(people_per_date_formatted, closed) |>
+  mutate(
+    doy = factor(
+      day_of_week,
+      levels = rev(c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+    )
+  )
+
+plot <- plot_data |>
+  ggplot(aes(x = week, y = doy, fill = n)) +
+  geom_tile(color = 'White', linewidth = 0.1) +
+  scale_fill_viridis(name = "Sign Ins") +
+  coord_equal() +
+  ggtitle("Studio Sign Ins") +
+  xlab("Date") +
+  ylab("") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+
+ggplotly(plot)
+
+#calendarHeat(plot_data$date, plot_data$n)
+
+# signin_clean |>
+#   filter(Action == "Sign In") |>
+#   ggplot(
+#     aes(y = date)
+#   ) +
+#   geom_tile(color = 'White', linewidth = 0.1, stat = "count") +
+#   scale_fill_viridis(name = "Sign Ins")
+```
+
+Plotly version
+```{r}
+fig <- plot_ly(
+  data = plot_data,
+  x = ~week,
+  y = ~doy,
+  z = ~n,
+  type = "heatmap",
+  text = ~date
+)
+
+fig
+```
+
+```{r}
+# https://albert-rapp.de/posts/ggplot2-tips/35_calendar_plots/35_calendar_plots
+labels_color <- 'grey30'
+schedueled_color <- '#009E73'
+
+calendar_data <- people_per_date_formatted |>
+  mutate(
+    day = mday(date),
+    month = glue(
+      "{year(date)} - {month(
+      date, label = T, abbr = F, locale = 'en_US.UTF-8'
+    )}"
+    ),
+    wday = wday(date, label = T, locale = 'en_US.UTF-8'),
+    week = stringi::stri_datetime_fields(date)$WeekOfMonth
+  )
+
+calendar_plot <- calendar_data |>
+  ggplot(aes(day_of_week, 5 - week)) +
+  geom_tile(
+    aes(fill = n),
+    col = labels_color
+  ) +
+  facet_wrap(vars(month), ncol = 3) +
+  coord_equal(expand = FALSE) +
+  scale_fill_gradient(
+    high = schedueled_color,
+    low = colorspace::lighten(schedueled_color, 0.9),
+  )
+
+ggplotly(calendar_plot)
+```
+
+```{r}
+plot_ly(
+  data = calendar_data,
+  x = ~ week - 5,
+  y = ~day_of_week,
+  z = ~n,
+  type = "heatmap",
+  text = ~date
+)
+```
+
+```{r member_hours}
+duplicate_entry <- signin_clean |>
+  dplyr::summarise(n = dplyr::n(), .by = c(member, date, Action)) |>
+  dplyr::filter(n > 1L)
+
+member_time <- signin_clean |>
+  anti_join(duplicate_entry, by = join_by(member, date, Action)) |>
+  pivot_wider(names_from = Action, values_from = Timestamp) |>
+  filter(!is.na(`Sign In`)) |>
+  filter(!is.na(`Sign Out`)) |>
+  mutate(
+    duration = time_length(interval(`Sign In`, `Sign Out`), unit = "minute")
+  ) |>
+  filter(duration > 10)
+```
+
+#### Average Studio Use Length
+
+-   Very rough calculations
+-   Members that did not sign in or out is excluded
+-   Assuming the Time stamp time was sign in sign out time
+-   Filtered out entries where there are multiple entries
+-   Average member use time `r mean(member_time$duration) / 60` hours
+-   This is constrained by classes in session and studio availability
+
+#### Average Member use per month
+```{r}
+member_time |>
+  group_by(month) |>
+  summarise(average_studio_time = mean(duration)) |>
+  arrange(desc(average_studio_time)) |>
+  mutate(average_studio_time_hours = average_studio_time / 60) |>
+  datatable()
+```
+
+#### Average Member use per day of week
+```{r}
+member_time |>
+  group_by(day_of_week) |>
+  summarise(average_studio_time = mean(duration)) |>
+  arrange(desc(average_studio_time)) |>
+  mutate(average_studio_time_hours = average_studio_time / 60) |>
+  datatable()
+```
+
+#### Total Member use per day of week
+```{r}
+member_time |>
+  group_by(day_of_week) |>
+  summarise(average_studio_time = sum(duration)) |>
+  arrange(desc(average_studio_time)) |>
+  mutate(average_studio_time_hours = average_studio_time / 60) |>
+  datatable()
+```
+
+Total Member use per month
+```{r}
+member_time |>
+  group_by(month) |>
+  summarise(average_studio_time = sum(duration)) |>
+  arrange(desc(average_studio_time)) |>
+  mutate(average_studio_time_hours = average_studio_time / 60) |>
+  datatable()
+```
