@@ -1,0 +1,180 @@
+---
+title: "Feb 5 Meeting - Studio Usage"
+format: html
+knitr:
+  opts_chunk: 
+    collapse: true
+    comment: "#" 
+    echo: false
+    message: false
+---
+
+```{r setup}
+library(googlesheets4)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(viridis)
+library(forcats)
+library(DT)
+library(glue)
+library(tidyr)
+library(plotly)
+```
+
+```{r}
+start_date <- "2025-12-01"
+```
+
+```{r google_sheet}
+membership_sheet <- "https://docs.google.com/spreadsheets/d/1Ldrcx_iVWi2Bv3GQoIHE2hOkf0Ah-nKVK3GFnXBXfts/edit?gid=1039957161#gid=1039957161"
+membership <- read_sheet(membership_sheet, sheet = "2025-2026")
+
+sheet <- "https://docs.google.com/spreadsheets/d/1-XhBYaeJI-uwPJsDb2ucxgnifXC1WdGjejI9a0QK0Po/edit?gid=1184437612#gid=1184437612"
+signin <- read_sheet(sheet)
+```
+
+```{r clean_up}
+signin_clean <- signin |>
+  select(Timestamp, `Column 2`, Action) |>
+  mutate(
+    date = date(Timestamp),
+    month = month(date),
+    day_of_week = wday(date)
+  ) |>
+  filter(date >= as_date(start_date)) |>
+  rename("member" = "Column 2")
+```
+
+```{r signout_analysis}
+no_signout <- signin_clean |>
+  group_by(member, date) |>
+  count() |>
+  filter(n == 1) |>
+  nrow()
+
+multi_signin <- signin_clean |>
+  group_by(member, date) |>
+  count() |>
+  mutate(in_studio = n / 2) |>
+  filter(in_studio > 1)
+```
+
+### Data Limitations
+
+-   During this time members still signed in manually
+-   Some new member sign ins were not captured
+-   Not all sign out times were logged
+-   `r no_signout` of `r NROW(signin_clean)` (`r round((no_signout / NROW(signin_clean)) * 100, 2)` %) entries did not have a sign out
+
+### Findings
+
+#### Number of Unique People Per Day
+
+-   Data collection spans from `r min(signin_clean$date)` to `r max(signin_clean$date)`
+
+```{r usage}
+people_per_day <- signin_clean |>
+  filter(Action == "Sign In") |>
+  group_by(date) |>
+  count() |>
+  mutate(
+    month = month(date),
+    day_of_week = wday(date, label = TRUE),
+    weekend = ifelse(day_of_week %in% c("Sun", "Sat"), TRUE, FALSE)
+  )
+```
+
+```{r sign_in_implementation}
+doy_plot <- ggplot(people_per_day, aes(x = date, y = n, fill = day_of_week)) +
+  geom_col() +
+  ggtitle("Number of sign ins per day") +
+  ylab("Members in the Studio")
+
+ggplotly(doy_plot)
+
+weekend_plot <- ggplot(people_per_day, aes(x = date, y = n, fill = weekend)) +
+  geom_col() +
+  ggtitle("Number of sign ins per day") +
+  ylab("Members in the Studio")
+ggplotly(weekend_plot)
+```
+
+```{r}
+member_usage <- signin_clean |>
+  group_by(member) |>
+  count() |>
+  arrange(desc(n))
+```
+
+### By Person usage
+
+-   Only captures people using the sign in form
+-   `r NROW(member_usage)`/ `r NROW(membership)` (`r round((NROW(member_usage)/NROW(membership))*100, 2)` %) has been using the sign in form or coming into the studio
+-   Of the `r max(signin_clean$date) - min(signin_clean$date)` days the form was in use, `r NROW(multi_signin)` members came multiple times in a single day
+
+
+#### Studio usage over days of the week
+```{r member_hours}
+duplicate_entry <- signin_clean |>
+  dplyr::summarise(n = dplyr::n(), .by = c(member, date, Action)) |>
+  dplyr::filter(n > 1L)
+
+member_time <- signin_clean |>
+  anti_join(duplicate_entry, by = join_by(member, date, Action)) |>
+  pivot_wider(names_from = Action, values_from = Timestamp) |>
+  filter(!is.na(`Sign In`)) |>
+  filter(!is.na(`Sign Out`)) |>
+  mutate(
+    duration = time_length(interval(`Sign In`, `Sign Out`), unit = "minute")
+  ) |>
+  filter(duration > 10)
+```
+
+#### Studio Sign In Times
+This shows when people signed in each day. People usually don't come in all at once. More popular days will have more squares
+```{r}
+time_plot <- member_time |>
+  mutate(hour = hour(`Sign In`)) |>
+  count(hour, date) |>
+  ggplot(aes(x = date, y = hour, fill = n)) +
+  geom_tile(color = 'White', linewidth = 0.1) +
+  scale_fill_viridis(name = "Sign Ins") +
+  coord_equal() +
+  ggtitle("Studio Sign Ins by the Hour Per Day") +
+  xlab("Date") +
+  ylab("") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+
+ggplotly(time_plot)
+```
+
+
+#### Average Studio Use Length
+
+-   Very rough calculations
+-   Members that did not sign in or out is excluded
+-   Assuming the Time stamp time was sign in sign out time
+-   Filtered out entries where there are multiple entries
+-   Average member use time `r mean(member_time$duration) / 60` hours
+-   This is constrained by classes in session and studio availability
+
+#### Average Member use per day of week
+```{r}
+member_time |>
+  group_by(day_of_week) |>
+  summarise(average_studio_time = mean(duration)) |>
+  arrange(desc(average_studio_time)) |>
+  mutate(
+    average_studio_time_hours = round(average_studio_time / 60, 2)
+  ) |>
+  arrange(day_of_week) |>
+  mutate(day_of_week = wday(day_of_week, label = TRUE)) |>
+  select(
+    "Day of Week" = "day_of_week",
+    "Average Studio Time (hours)" = "average_studio_time_hours"
+  ) |>
+  datatable()
+```
