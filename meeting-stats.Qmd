@@ -131,16 +131,20 @@ member_time <- signin_clean |>
   filter(duration > 10)
 ```
 
-#### Studio Sign In Times
-This shows when people signed in each day. People usually don't come in all at once. More popular days will have more squares
+
 ```{r}
 time_plot <- member_time |>
-  mutate(hour = hour(`Sign In`)) |>
-  count(hour, date) |>
+  mutate(
+    hour = hour(`Sign In`),
+    date = wday(date, label = TRUE),
+    month_year = glue("{year(`Sign In`)} {month(month, label = TRUE)}")
+  ) |>
+  count(hour, date, month_year) |>
   ggplot(aes(x = date, y = hour, fill = n)) +
   geom_tile(color = 'White', linewidth = 0.1) +
   scale_fill_viridis(name = "Sign Ins") +
   coord_equal() +
+  facet_wrap(~month_year) +
   ggtitle("Studio Sign Ins by the Hour Per Day") +
   xlab("Date") +
   ylab("") +
