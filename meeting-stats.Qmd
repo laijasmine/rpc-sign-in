@@ -44,6 +44,21 @@ signin_clean <- signin |>
   ) |>
   filter(date >= as_date(start_date)) |>
   rename("member" = "Column 2")
+
+# check if there are any large discrepancies between the time stamp and time entered
+quality_check <- signin |>
+  rename(manual = `Column 8`) |>
+  mutate(
+    timestamp_hour = hour(Timestamp),
+    manual_time = hms(manual),
+    manual_hour = if_else(
+      stringr::str_detect(manual, "AM") | (hour(manual_time) == 12),
+      hour(manual_time),
+      hour(manual_time) + 12
+    )
+  ) |>
+  select(manual_hour, timestamp_hour) |>
+  filter(manual_hour != timestamp_hour)
 ```
 
 ```{r signout_analysis}
@@ -107,14 +122,6 @@ member_usage <- signin_clean |>
   arrange(desc(n))
 ```
 
-### By Person usage
-
--   Only captures people using the sign in form
--   `r NROW(member_usage)`/ `r NROW(membership)` (`r round((NROW(member_usage)/NROW(membership))*100, 2)` %) has been using the sign in form or coming into the studio
--   Of the `r max(signin_clean$date) - min(signin_clean$date)` days the form was in use, `r NROW(multi_signin)` members came multiple times in a single day
-
-
-#### Studio usage over days of the week
 ```{r member_hours}
 duplicate_entry <- signin_clean |>
   dplyr::summarise(n = dplyr::n(), .by = c(member, date, Action)) |>
@@ -126,19 +133,28 @@ member_time <- signin_clean |>
   filter(!is.na(`Sign In`)) |>
   filter(!is.na(`Sign Out`)) |>
   mutate(
-    duration = time_length(interval(`Sign In`, `Sign Out`), unit = "minute")
-  ) |>
-  filter(duration > 10)
-```
-
-
-```{r}
-time_plot <- member_time |>
-  mutate(
+    duration = time_length(interval(`Sign In`, `Sign Out`), unit = "minute"),
     hour = hour(`Sign In`),
     date = wday(date, label = TRUE),
     month_year = glue("{year(`Sign In`)} {month(month, label = TRUE)}")
   ) |>
+  filter(duration > 10)
+# removes any short entries (manualy entered)
+```
+
+#### Studio usage over days of the week
+-  Total number of sign ins `r NROW(member_time)` (removed any data that was outside of the studio open times)
+-   Only captures people using the sign in form
+-   `r NROW(member_usage)`/ `r NROW(membership)` (`r round((NROW(member_usage)/NROW(membership))*100, 2)` %) total members has been using the sign in form or coming into the studio
+-   Of the `r max(signin_clean$date) - min(signin_clean$date)` days the form was in use, `r NROW(multi_signin)` members came multiple times in a single day
+
+```{r}
+time_plot <- member_time |>
+  # mutate(
+  #   hour = hour(`Sign In`),
+  #   date = wday(date, label = TRUE),
+  #   month_year = glue("{year(`Sign In`)} {month(month, label = TRUE)}")
+  # ) |>
   count(hour, date, month_year) |>
   ggplot(aes(x = date, y = hour, fill = n)) +
   geom_tile(color = 'White', linewidth = 0.1) +
@@ -147,7 +163,7 @@ time_plot <- member_time |>
   facet_wrap(~month_year) +
   ggtitle("Studio Sign Ins by the Hour Per Day") +
   xlab("Date") +
-  ylab("") +
+  ylab("Hour") +
   theme(
     axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
   )
@@ -155,15 +171,22 @@ time_plot <- member_time |>
 ggplotly(time_plot)
 ```
 
+#### Total sign ins per month
+```{r}
+member_time |>
+  count(month) |>
+  datatable()
+```
+
 
 #### Average Studio Use Length
 
 -   Very rough calculations
--   Members that did not sign in or out is excluded
--   Assuming the Time stamp time was sign in sign out time
--   Filtered out entries where there are multiple entries
--   Average member use time `r mean(member_time$duration) / 60` hours
--   This is constrained by classes in session and studio availability
+-   Members that did not sign in and out are excluded
+-   Assuming the timestamp was sign in sign out time
+-   Filtered out entries where there are multiple entries (multiple sign ins in one day)
+-   Average member use time is `r mean(member_time$duration) / 60` hours
+-   This is constrained by when classes in session and studio availability
 
 #### Average Member use per day of week
 ```{r}
@@ -181,4 +204,13 @@ member_time |>
     "Average Studio Time (hours)" = "average_studio_time_hours"
   ) |>
   datatable()
+
+# Usage Duration by month
+# member_time |>
+#   group_by(day_of_week, month) |>
+#   summarise(average_studio_time = mean(duration)) |>
+#   ungroup()|>
+#   pivot_wider(names_from = month, values_from = average_studio_time) |>
+#   mutate(day_of_week = wday(day_of_week, label = TRUE)) |>
+#   datatable()
 ```
