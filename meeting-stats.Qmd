@@ -14,12 +14,13 @@ library(googlesheets4)
 library(ggplot2)
 library(dplyr)
 library(lubridate)
-library(viridis)
+library(ghibli)
 library(forcats)
 library(DT)
 library(glue)
 library(tidyr)
 library(plotly)
+library(viridis)
 ```
 
 ```{r}
@@ -62,9 +63,11 @@ quality_check <- signin |>
 ```
 
 ```{r signout_analysis}
-no_signout <- signin_clean |>
+signin_only <- signin_clean |>
   group_by(member, date) |>
-  count() |>
+  count()
+
+no_signout <- signin_only |>
   filter(n == 1) |>
   nrow()
 
@@ -80,7 +83,7 @@ multi_signin <- signin_clean |>
 -   During this time members still signed in manually
 -   Some new member sign ins were not captured
 -   Not all sign out times were logged
--   `r no_signout` of `r NROW(signin_clean)` (`r round((no_signout / NROW(signin_clean)) * 100, 2)` %) entries did not have a sign out
+-   `r no_signout` of `r NROW(signin_only)` (`r round((no_signout / NROW(signin_only)) * 100, 2)` %) sign ins did not have a sign out
 
 ### Findings
 
@@ -104,7 +107,8 @@ people_per_day <- signin_clean |>
 doy_plot <- ggplot(people_per_day, aes(x = date, y = n, fill = day_of_week)) +
   geom_col() +
   ggtitle("Number of sign ins per day") +
-  ylab("Members in the Studio")
+  ylab("Members in the Studio") +
+  scale_fill_ghibli_d("PonyoMedium")
 
 ggplotly(doy_plot)
 
@@ -160,7 +164,13 @@ time_plot <- member_time |>
   geom_tile(color = 'White', linewidth = 0.1) +
   scale_fill_viridis(name = "Sign Ins") +
   coord_equal() +
-  facet_wrap(~month_year) +
+  facet_wrap(
+    ~ factor(
+      month_year,
+      levels = purrr::map(2025:year(Sys.Date()), ~ paste(.x, month.abb)) |>
+        unlist()
+    )
+  ) +
   ggtitle("Studio Sign Ins by the Hour Per Day") +
   xlab("Date") +
   ylab("Hour") +
@@ -174,7 +184,8 @@ ggplotly(time_plot)
 #### Total sign ins per month
 ```{r}
 member_time |>
-  count(month) |>
+  mutate(year = year(`Sign In`)) |>
+  count(year, month) |>
   datatable()
 ```
 
