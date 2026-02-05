@@ -108,7 +108,7 @@ doy_plot <- ggplot(people_per_day, aes(x = date, y = n, fill = day_of_week)) +
   geom_col() +
   ggtitle("Number of sign ins per day") +
   ylab("Members in the Studio") +
-  scale_fill_ghibli_d("PonyoMedium")
+  scale_fill_manual(values = palette("Tableau 10")[2:8])
 
 ggplotly(doy_plot)
 
