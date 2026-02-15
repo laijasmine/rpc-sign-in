@@ -153,11 +153,13 @@ member_time <- signin_clean |>
 -   Of the `r max(signin_clean$date) - min(signin_clean$date)` days the form was in use, `r NROW(multi_signin)` members came multiple times in a single day
 
 ```{r}
-time_data <- member_time |>
+time_plot <- member_time |>
+  # mutate(
+  #   hour = hour(`Sign In`),
+  #   date = wday(date, label = TRUE),
+  #   month_year = glue("{year(`Sign In`)} {month(month, label = TRUE)}")
+  # ) |>
   count(hour, date, month_year) |>
-  arrange(date, month_year)
-
-time_plot <- time_data |>
   ggplot(aes(x = date, y = hour, fill = n)) +
   geom_tile(color = 'White', linewidth = 0.1) +
   scale_fill_viridis(name = "Sign Ins") +
