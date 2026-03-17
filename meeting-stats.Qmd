@@ -1,5 +1,5 @@
 ---
-title: "Feb 5 Meeting - Studio Usage"
+title: "Studio Usage"
 format: html
 knitr:
   opts_chunk: 
