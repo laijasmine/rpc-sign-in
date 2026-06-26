@@ -64,23 +64,12 @@ multi_signin <- signin_clean |>
 
 ### Findings
 
-#### Number of Unique People Per Day
-
--   Data collection spans from `r min(signin_clean$date)` to `r max(signin_clean$date)`
--   Wide spread use only kicks in in December 2025
-
 ```{r usage}
 people_per_day <- signin_clean |>
   filter(Action == "Sign In") |>
   group_by(date) |>
   count() |>
   mutate(month = month(date), day_of_week = wday(date, label = TRUE))
-```
-
-```{r sign_in_implementation}
-ggplot(people_per_day, aes(x = date, y = n)) +
-  geom_col() +
-  ggtitle("Number of sign ins per day")
 ```
 
 ```{r}
@@ -94,116 +83,53 @@ member_usage <- signin_clean |>
 
 -   Only captures people using the sign in form
 -   `r NROW(member_usage)`/ `r NROW(membership)` (`r round((NROW(member_usage)/NROW(membership))*100, 2)` %) has been using the sign in form or coming into the studio
--   Of the `r max(signin_clean$date) - min(signin_clean$date)` days the form was in use, `r NROW(multi_signin)` members came multiple times in a single day
-
 
 #### Studio usage over days of the week
 
 ```{r calendar_plot}
+day_levels <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
 closed <- data.frame(
   date = as.Date(c("2025-12-25", "2025-12-26", "2026-01-01")),
-  week = c("2025 - 51", "2025 - 51", "2026 - 1"),
-  day_of_week = c("Thu", "Fri", "Thu"),
-  n = c(NA, NA, NA)
-)
+  n = NA_integer_
+) |>
+  mutate(
+    week_start = floor_date(date, unit = "week", week_start = 1),
+    day_of_week = wday(date, label = TRUE)
+  )
 
 people_per_date_formatted <- people_per_day |>
-  mutate(
-    month = as.factor(month),
-    week = glue("{year(date)} - {week(date)}")
-  ) |>
   filter(date > "2025-11-27") |>
-  select(week, day_of_week, n)
+  mutate(week_start = floor_date(date, unit = "week", week_start = 1)) |>
+  select(date, week_start, day_of_week, n)
 
-plot_data <- rbind(people_per_date_formatted, closed) |>
+plot_data <- bind_rows(people_per_date_formatted, closed) |>
   mutate(
-    doy = factor(
-      day_of_week,
-      levels = rev(c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+    doy = factor(day_of_week, levels = rev(day_levels)),
+    tooltip_text = glue(
+      "{format(date, '%a, %b %d %Y')}\nSign Ins: {ifelse(is.na(n), 'Closed', n)}"
     )
   )
 
 plot <- plot_data |>
-  ggplot(aes(x = week, y = doy, fill = n)) +
-  geom_tile(color = 'White', linewidth = 0.1) +
-  scale_fill_viridis(name = "Sign Ins") +
-  coord_equal() +
-  ggtitle("Studio Sign Ins") +
-  xlab("Date") +
-  ylab("") +
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
-  )
-
-ggplotly(plot)
-
-#calendarHeat(plot_data$date, plot_data$n)
-
-# signin_clean |>
-#   filter(Action == "Sign In") |>
-#   ggplot(
-#     aes(y = date)
-#   ) +
-#   geom_tile(color = 'White', linewidth = 0.1, stat = "count") +
-#   scale_fill_viridis(name = "Sign Ins")
-```
-
-Plotly version
-```{r}
-fig <- plot_ly(
-  data = plot_data,
-  x = ~week,
-  y = ~doy,
-  z = ~n,
-  type = "heatmap",
-  text = ~date
-)
-
-fig
-```
-
-```{r}
-# https://albert-rapp.de/posts/ggplot2-tips/35_calendar_plots/35_calendar_plots
-labels_color <- 'grey30'
-schedueled_color <- '#009E73'
-
-calendar_data <- people_per_date_formatted |>
-  mutate(
-    day = mday(date),
-    month = glue(
-      "{year(date)} - {month(
-      date, label = T, abbr = F, locale = 'en_US.UTF-8'
-    )}"
-    ),
-    wday = wday(date, label = T, locale = 'en_US.UTF-8'),
-    week = stringi::stri_datetime_fields(date)$WeekOfMonth
-  )
-
-calendar_plot <- calendar_data |>
-  ggplot(aes(day_of_week, 5 - week)) +
-  geom_tile(
-    aes(fill = n),
-    col = labels_color
+  ggplot(aes(x = week_start, y = doy, fill = n, text = tooltip_text)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_viridis(name = "Sign Ins", na.value = "grey85") +
+  scale_x_date(
+    date_breaks = "1 week",
+    date_labels = "%b %d",
+    expand = c(0, 0)
   ) +
-  facet_wrap(vars(month), ncol = 3) +
-  coord_equal(expand = FALSE) +
-  scale_fill_gradient(
-    high = schedueled_color,
-    low = colorspace::lighten(schedueled_color, 0.9),
+  labs(title = "Studio Sign Ins", x = "Week of", y = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
   )
 
-ggplotly(calendar_plot)
-```
-
-```{r}
-plot_ly(
-  data = calendar_data,
-  x = ~ week - 5,
-  y = ~day_of_week,
-  z = ~n,
-  type = "heatmap",
-  text = ~date
-)
+ggplotly(plot, tooltip = "text") |>
+  layout(hoverlabel = list(align = "left"))
 ```
 
 ```{r member_hours}
@@ -217,56 +143,78 @@ member_time <- signin_clean |>
   filter(!is.na(`Sign In`)) |>
   filter(!is.na(`Sign Out`)) |>
   mutate(
+    month_start = floor_date(date, unit = "month"),
     duration = time_length(interval(`Sign In`, `Sign Out`), unit = "minute")
   ) |>
-  filter(duration > 10)
+  filter(duration > 10) |>
+  group_by(month_start) |>
+  summarise(avg_time_spent = round(mean(duration) / 60, 1))
 ```
 
 #### Average Studio Use Length
-
--   Very rough calculations
 -   Members that did not sign in or out is excluded
 -   Assuming the Time stamp time was sign in sign out time
 -   Filtered out entries where there are multiple entries
--   Average member use time `r mean(member_time$duration) / 60` hours
+-   Average member use time `r mean(member_time$avg_time_spent)` hours
 -   This is constrained by classes in session and studio availability
 
 #### Average Member use per month
-```{r}
-member_time |>
-  group_by(month) |>
-  summarise(average_studio_time = mean(duration)) |>
-  arrange(desc(average_studio_time)) |>
-  mutate(average_studio_time_hours = average_studio_time / 60) |>
-  datatable()
-```
 
-#### Average Member use per day of week
-```{r}
-member_time |>
-  group_by(day_of_week) |>
-  summarise(average_studio_time = mean(duration)) |>
-  arrange(desc(average_studio_time)) |>
-  mutate(average_studio_time_hours = average_studio_time / 60) |>
-  datatable()
-```
+```{r monthly_summary}
+monthly_usage <- people_per_day |>
+  mutate(month_start = floor_date(date, unit = "month")) |>
+  group_by(month_start) |>
+  summarise(
+    total_sign_ins = sum(n, na.rm = TRUE),
+    days_with_activity = n_distinct(date),
+    avg_sign_ins_per_day = round(total_sign_ins / days_with_activity, 1),
+    .groups = "drop"
+  ) |>
+  arrange(month_start) |>
+  mutate(
+    Month = format(month_start, "%B %Y"),
+  ) |>
+  left_join(member_time, by = join_by(month_start == month_start)) |>
+  select(
+    Month,
+    `Total Sign Ins` = total_sign_ins,
+    `Days Active` = days_with_activity,
+    `Average number of sign ins per Active Day` = avg_sign_ins_per_day,
+    `Average number of hours spent` = avg_time_spent
+  )
 
-#### Total Member use per day of week
-```{r}
-member_time |>
-  group_by(day_of_week) |>
-  summarise(average_studio_time = sum(duration)) |>
-  arrange(desc(average_studio_time)) |>
-  mutate(average_studio_time_hours = average_studio_time / 60) |>
-  datatable()
-```
-
-Total Member use per month
-```{r}
-member_time |>
-  group_by(month) |>
-  summarise(average_studio_time = sum(duration)) |>
-  arrange(desc(average_studio_time)) |>
-  mutate(average_studio_time_hours = average_studio_time / 60) |>
-  datatable()
+datatable(
+  monthly_usage,
+  rownames = FALSE,
+  options = list(
+    dom = "t",
+    ordering = FALSE,
+    pageLength = nrow(monthly_usage)
+  ),
+  caption = "Studio Usage by Month"
+) |>
+  formatStyle(
+    "Total Sign Ins",
+    background = styleColorBar(
+      range(monthly_usage$`Total Sign Ins`),
+      "lightblue"
+    ),
+    backgroundSize = "98% 88%",
+    backgroundRepeat = "no-repeat",
+    backgroundPosition = "center"
+  ) |>
+  formatStyle(
+    "Average number of sign ins per Active Day",
+    background = styleColorBar(
+      range(monthly_usage$`Average number of sign ins per Active Day`),
+      "#fdd49e"
+    ),
+    backgroundSize = "98% 88%",
+    backgroundRepeat = "no-repeat",
+    backgroundPosition = "center"
+  ) |>
+  formatStyle(
+    "Month",
+    fontWeight = "bold"
+  )
 ```
